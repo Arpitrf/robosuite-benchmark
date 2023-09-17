@@ -55,20 +55,23 @@ if __name__ == "__main__":
     env_args["ignore_done"] = True
 
     # Specify camera name if we're recording a video
-    if args.record_video:
-        env_args["camera_names"] = args.camera
-        env_args["camera_heights"] = 512
-        env_args["camera_widths"] = 512
+    # if args.record_video:
+        # env_args["camera_names"] = args.camera
+        # env_args["camera_heights"] = 512
+        # env_args["camera_widths"] = 512
 
     # Setup video recorder if necesssary
     if args.record_video:
         # Grab name of this rollout combo
         video_name = "{}-{}-{}".format(
             env_args["env_name"], "".join(env_args["robots"]), env_args["controller"]).replace("_", "-")
+        obs_video_name = video_name + '-obs'
+        # print("video_name, obs_video_name: ", video_name, obs_video_name)
         # Calculate appropriate fps
         fps = int(env_args["control_freq"])
         # Define video writer
         video_writer = imageio.get_writer("{}.mp4".format(video_name), fps=fps)
+        video_writer_obs = imageio.get_writer("{}.mp4".format(obs_video_name), fps=fps)
 
     # Pop the controller
     controller = env_args.pop("controller")
@@ -81,19 +84,20 @@ if __name__ == "__main__":
     env_suite = suite.make(**env_args,
                            controller_configs=controller_config,
                            has_renderer=not args.record_video,
-                           has_offscreen_renderer=args.record_video,
-                           use_object_obs=True,
-                           use_camera_obs=args.record_video,
+                        #    has_offscreen_renderer=args.record_video,
+                        #    use_object_obs=True,
+                        #    use_camera_obs=args.record_video,
                            reward_shaping=True
                            )
     
     # Make sure we only pass in the proprio and object obs (no images)
-    keys = ["object-state"]
-    for idx in range(len(env_suite.robots)):
-        keys.append(f"robot{idx}_proprio-state")
+    # keys = ["object-state"]
+    # for idx in range(len(env_suite.robots)):
+    #     keys.append(f"robot{idx}_proprio-state")
     
     # Wrap environment so it's compatible with Gym API
-    env = GymWrapper(env_suite, keys=keys)
+    print("env_suite: ", type(env_suite), env_suite.camera_names)
+    env = GymWrapper(env_suite)
 
     # Run rollout
     simulate_policy(
@@ -102,7 +106,9 @@ if __name__ == "__main__":
         horizon=env_args["horizon"],
         render=not args.record_video,
         video_writer=video_writer,
+        video_writer_obs=video_writer_obs,
         num_episodes=args.num_episodes,
         printout=True,
         use_gpu=args.gpu,
     )
+

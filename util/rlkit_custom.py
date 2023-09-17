@@ -9,10 +9,14 @@ from rlkit.core.rl_algorithm import BaseRLAlgorithm, _get_epoch_timings
 from rlkit.data_management.replay_buffer import ReplayBuffer
 from rlkit.samplers.data_collector import DataCollector
 from rlkit.samplers.data_collector import PathCollector
+from rlkit.data_management.torch_datasets import GraspDataset
 
 from collections import OrderedDict
 
 import numpy as np
+import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+import h5py
 
 import rlkit.pythonplusplus as ppp
 
@@ -177,6 +181,7 @@ class CustomBatchRLAlgorithm(CustomBaseRLAlgorithm, metaclass=abc.ABCMeta):
             num_trains_per_train_loop,
             num_train_loops_per_epoch=1,
             min_num_steps_before_training=0,
+            log_dir=None
     ):
         super().__init__(
             trainer,
@@ -195,6 +200,23 @@ class CustomBatchRLAlgorithm(CustomBaseRLAlgorithm, metaclass=abc.ABCMeta):
         self.num_train_loops_per_epoch = num_train_loops_per_epoch
         self.num_expl_steps_per_train_loop = num_expl_steps_per_train_loop
         self.min_num_steps_before_training = min_num_steps_before_training
+        self.log_dir = log_dir
+
+    def get_loader(self, hdf5_path,
+               batch_size=2,
+               num_workers=4):
+        dataset = GraspDataset(hdf5_path=hdf5_path)
+        # print("len(dataset): ", len(dataset))
+        if len(dataset) < batch_size:
+            return None
+        print("batch_size for trainingggggggggg: ", batch_size)
+        return DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=num_workers)
+
 
     def _train(self):
         if self.min_num_steps_before_training > 0:
@@ -203,6 +225,16 @@ class CustomBatchRLAlgorithm(CustomBaseRLAlgorithm, metaclass=abc.ABCMeta):
                 self.min_num_steps_before_training,
                 discard_incomplete_paths=False,
             )
+            # print("init_expl_paths: ", len(init_expl_paths), init_expl_paths[0].keys())
+            # print(len(init_expl_paths[0]['observations']), len(init_expl_paths[0]['env_infos']))
+            # print("============")
+            # for k, v in init_expl_paths[3].items():
+            #     print("k, dtype(v): ", k, type(v[2]))
+            #     if isinstance(v[2], np.ndarray):
+            #         print("np array shape: ", v[2].shape)
+            #     if isinstance(v[2], dict):
+            #         print("dict keys: ", v[2].keys())
+            # print("============")
             self.replay_buffer.add_paths(init_expl_paths)
             self.expl_data_collector.end_epoch(-1)
 
@@ -210,6 +242,7 @@ class CustomBatchRLAlgorithm(CustomBaseRLAlgorithm, metaclass=abc.ABCMeta):
                 range(self._start_epoch, self.num_epochs),
                 save_itrs=True,
         ):
+            print("Collecting eval paths")
             self.eval_data_collector.collect_new_paths(
                 self.eval_max_path_length,
                 self.num_eval_steps_per_epoch,
@@ -218,20 +251,29 @@ class CustomBatchRLAlgorithm(CustomBaseRLAlgorithm, metaclass=abc.ABCMeta):
             gt.stamp('evaluation sampling', unique=False)
 
             for _ in range(self.num_train_loops_per_epoch):
+                print("Collecting expl paths")
                 new_expl_paths = self.expl_data_collector.collect_new_paths(
                     self.expl_max_path_length,
                     self.num_expl_steps_per_train_loop,
                     discard_incomplete_paths=False,
                 )
+                # print("new_expl_paths: ", len(new_expl_paths), new_expl_paths[0]['observations'].shape)
+                # plt.imshow(new_expl_paths[0]['observations'][9][:65536].reshape(256, 256))
+                # plt.show()
                 gt.stamp('exploration sampling', unique=False)
 
                 self.replay_buffer.add_paths(new_expl_paths)
                 gt.stamp('data storing', unique=False)
 
                 self.training_mode(True)
-                for _ in range(self.num_trains_per_train_loop):
-                    train_data = self.replay_buffer.random_batch(
-                        self.batch_size)
+                print("Starting training")
+                loader = self.get_loader(f"{self.log_dir}/replay_buffer.hdf5", self.batch_size)
+                with h5py.File(self.log_dir + '/replay_buffer.hdf5', 'r') as f:
+                    print("Size of the replay buffer just before starting training: ", len(f.keys()))
+                for _, train_data in zip(range(self.num_trains_per_train_loop), loader):
+                    # train_data = self.replay_buffer.random_batch(
+                    #     self.batch_size)
+                    # print("train_data: ", train_data['rewards'].is_cuda)
                     self.trainer.train(train_data)
                 gt.stamp('training', unique=False)
                 self.training_mode(False)
@@ -306,6 +348,7 @@ class CustomTorchBatchRLAlgorithm(CustomBatchRLAlgorithm):
 
     def training_mode(self, mode):
         for net in self.trainer.networks:
+            # print("netsssss: ", net)
             net.train(mode)
 
 
@@ -381,6 +424,7 @@ def rollout(
         render=False,
         render_kwargs=None,
         video_writer=None,
+        video_writer_obs=None
 ):
     """
     Custom rollout function that extends the basic rlkit functionality in the following ways:
@@ -422,6 +466,8 @@ def rollout(
         env.render(**render_kwargs)
 
     while path_length < max_path_length:
+        print("observation into policy: ", o.shape)
+        # print("TanhGaussianPolicy: ", agent)
         a, agent_info = agent.get_action(o)
         next_o, r, d, env_info = env.step(a)
         observations.append(o)
@@ -432,13 +478,17 @@ def rollout(
         # Grab image data to write to video writer if specified
         if video_writer is not None:
             # We need to directly grab full observations so we can get image data
-            full_obs = env._get_observation()
+            full_obs = env._get_observations()
 
             # Grab image data (assume relevant camera name is the first in the env camera array)
             img = full_obs[env.camera_names[0] + "_image"]
+            obs_img = full_obs[env.camera_names[0] + "_segmentation_class"]
+            # print("img, obs_img: ", img.shape, obs_img.shape)
 
             # Write to video writer
-            video_writer.append_data(img[::-1])
+            # video_writer.append_data(img[::-1])
+            video_writer.append_data(img)
+            video_writer_obs.append_data(obs_img)
 
         agent_infos.append(agent_info)
         env_infos.append(env_info)

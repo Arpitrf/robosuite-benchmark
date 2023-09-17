@@ -98,6 +98,7 @@ def run_experiment():
     # Setup logger
     abs_root_dir = os.path.join(THIS_DIR, args.log_dir)
     tmp_dir = setup_logger(tmp_file_prefix, variant=variant, base_log_dir=abs_root_dir)
+    variant['log_dir'] = tmp_dir
     ptu.set_gpu_mode(torch.cuda.is_available())  # optionally set the GPU (default=False
 
     # Run experiment
@@ -116,7 +117,7 @@ if __name__ == '__main__':
     print('\n\n')
     print('------------- Running {} --------------'.format(args.agent))
 
-    print('  Params: ')
+    # print('  Params: ')
     if args.variant is None:
         for key, value in args.__dict__.items():
             if key.startswith('__') or key.startswith('_'):

@@ -22,11 +22,25 @@ from robosuite.wrappers import GymWrapper
 from robosuite.controllers import load_controller_config, ALL_CONTROLLERS
 
 import numpy as np
+from prettytable import PrettyTable
+from torchsummary import summary
 
 
 # Define agents available
 AGENTS = {"SAC", "TD3"}
 
+# def count_parameters(model):
+#     table = PrettyTable(["Modules", "Parameters"])
+#     total_params = 0
+#     for name, parameter in model.named_parameters():
+#         if not parameter.requires_grad:
+#             continue
+#         params = parameter.numel()
+#         table.add_row([name, params])
+#         total_params += params
+#     print(table)
+#     print(f"Total Trainable Params: {total_params}")
+#     return total_params
 
 def experiment(variant, agent="SAC"):
 
@@ -46,19 +60,26 @@ def experiment(variant, agent="SAC"):
             # This is a string to the custom controller
             controller_config = load_controller_config(custom_fpath=controller)
         # Create robosuite env and append to our list
+        # camera options: ["frontview", "birdview", "sideview", "robot0_robotview", "robot0_eye_in_hand"]
         suites.append(suite.make(**env_config,
                                  has_renderer=False,
-                                 has_offscreen_renderer=False,
-                                 use_object_obs=True,
-                                 use_camera_obs=False,
+                                #  has_offscreen_renderer=False,
+                                #  use_object_obs=True,
+                                #  use_camera_obs=False,
                                  reward_shaping=True,
                                  controller_configs=controller_config,
                                  ))
+                                 
+    print("env.sim.model.camera_names: ", suites[0].sim.model.camera_names)
+    
     # Create gym-compatible envs
     expl_env = NormalizedBoxEnv(GymWrapper(suites[0]))
     eval_env = NormalizedBoxEnv(GymWrapper(suites[1]))
 
+    # change later
     obs_dim = expl_env.observation_space.low.size
+    obs_dim = 1056 #1024 (img_feats) + 32 (proprio)
+    obs_dim = 1066 #1024 (img_feats) + 32 (proprio) + 10 (object state) 
     action_dim = eval_env.action_space.low.size
 
     qf1 = FlattenMlp(
@@ -139,6 +160,7 @@ def experiment(variant, agent="SAC"):
     replay_buffer = EnvReplayBuffer(
         variant['replay_buffer_size'],
         expl_env,
+        log_dir=variant['log_dir']
     )
     eval_path_collector = MdpPathCollector(
         eval_env,
@@ -149,6 +171,36 @@ def experiment(variant, agent="SAC"):
         expl_policy,
     )
 
+    # Checking details about all the networks
+    print("++++++++++++++", expl_policy)
+    # expl_policy = expl_policy.cuda()
+    # print(summary(expl_policy, input_size=tuple([196650])))
+
+    # count_parameters(expl_policy)
+    # pytorch_total_params = sum(p.numel() for p in expl_policy.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in expl_policy.parameters() if p.requires_grad)
+    # print("expl_policy: ", next(expl_policy.parameters()).is_cuda, pytorch_total_params, pytorch_total_trainable_params)
+    
+    # pytorch_total_params = sum(p.numel() for p in expl_policy.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in expl_policy.parameters() if p.requires_grad)
+    # print("eval_policy: ", next(eval_policy.parameters()).is_cuda, eval_policy.parameters(), type(eval_policy.parameters()))
+    
+    # pytorch_total_params = sum(p.numel() for p in qf1.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in qf1.parameters() if p.requires_grad)
+    # print("qf1: ", next(qf1.parameters()).is_cuda, qf1.parameters(), type(qf1.parameters()))
+    
+    # pytorch_total_params = sum(p.numel() for p in qf2.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in qf2.parameters() if p.requires_grad)
+    # print("1f2: ", next(qf2.parameters()).is_cuda, qf2.parameters(), type(qf2.parameters()))
+    
+    # pytorch_total_params = sum(p.numel() for p in target_qf1.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in target_qf1.parameters() if p.requires_grad)
+    # print("target_qf1: ", next(target_qf1.parameters()).is_cuda, target_qf1.parameters(), type(target_qf1.parameters()))
+    
+    # pytorch_total_params = sum(p.numel() for p in target_qf2.parameters())
+    # pytorch_total_trainable_params = sum(p.numel() for p in expl_policy.parameters() if p.requires_grad)
+    # print("target_qf2: ", next(target_qf2.parameters()).is_cuda, target_qf2.parameters(), type(target_qf2.parameters()))
+
     # Define algorithm
     algorithm = CustomTorchBatchRLAlgorithm(
         trainer=trainer,
@@ -157,6 +209,7 @@ def experiment(variant, agent="SAC"):
         exploration_data_collector=expl_path_collector,
         evaluation_data_collector=eval_path_collector,
         replay_buffer=replay_buffer,
+        log_dir=variant['log_dir'],
         **variant['algorithm_kwargs']
     )
     algorithm.to(ptu.device)
@@ -227,6 +280,7 @@ def simulate_policy(
         horizon,
         render=False,
         video_writer=None,
+        video_writer_obs=None,
         num_episodes=np.inf,
         printout=False,
         use_gpu=False):
@@ -237,6 +291,7 @@ def simulate_policy(
     map_location = torch.device("cuda") if use_gpu else torch.device("cpu")
     data = torch.load(model_path, map_location=map_location)
     policy = data['evaluation/policy']
+    print("policy: ", type(policy))
 
     if printout:
         print("Policy loaded")
@@ -262,6 +317,7 @@ def simulate_policy(
             max_path_length=horizon,
             render=render,
             video_writer=video_writer,
+            video_writer_obs=video_writer_obs
         )
 
         # Log diagnostics if supported by env
