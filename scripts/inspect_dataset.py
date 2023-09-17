@@ -6,5 +6,5 @@ f = h5py.File('/home/arpit/test_projects/robosuite-benchmark/log/runs/Lift-Panda
 # print(f.keys())
 img = np.array(f['000000269_step228']['observations'])[:-32].reshape(256,256,3).astype(np.int64)
 print(img[0,0,0])
-plt.imshow(img)
-plt.show()
+# plt.imshow(img)
+# plt.show()
