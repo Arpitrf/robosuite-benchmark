@@ -20,7 +20,7 @@ args = parser.parse_args()
 
 # Define callbacks
 video_writer = None
-
+video_writer_obs = None
 
 def handler(signal_received, frame):
     # Handle any cleanup here

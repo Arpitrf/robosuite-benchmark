@@ -79,7 +79,7 @@ def experiment(variant, agent="SAC"):
     # change later
     obs_dim = expl_env.observation_space.low.size
     obs_dim = 1056 #1024 (img_feats) + 32 (proprio)
-    obs_dim = 1066 #1024 (img_feats) + 32 (proprio) + 10 (object state) 
+    # obs_dim = 1066 #1024 (img_feats) + 32 (proprio) + 10 (object state) 
     action_dim = eval_env.action_space.low.size
 
     qf1 = FlattenMlp(
